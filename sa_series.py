@@ -2,25 +2,14 @@
 """
 SermonAudio series downloader.
 
-Given a series URL like:
-  https://www.sermonaudio.com/series/200129
+Downloads all sermons in a series into a folder named after the series title
+(or series ID as fallback).
 
-or just the numeric ID:
-  200129
-
-This script will:
-
-  1. Fetch the series page.
-  2. Extract the series title from the HTML <title> tag.
-  3. Extract all sermon IDs (/sermons/<id> links).
-  4. Create a folder named after the series title
-     (fallback: series ID if title can't be found).
-  5. For each sermon ID, call sa_dl.download_audio_with_fallback(...)
-     to download high-quality audio with low-quality fallback.
-
-If the HTML title is missing or broken, the script will also try to infer
-a series title from the first MP3's tags, looking in the "Comments"
-field, and then rename the folder accordingly.
+Strategy for sermon list:
+  1. Try the series RSS feed: https://feed.sermonaudio.com/<series_id>
+     (this should contain ALL sermons in the series).
+  2. If RSS fetch fails or returns nothing, fall back to scraping the HTML
+     series page (which may only include the first ~25 sermons).
 """
 
 import sys
@@ -32,28 +21,24 @@ import urllib.error
 import html as html_module
 from typing import Optional
 
-# Import your existing single-sermon downloader
-import sa_dl  # type: ignore
+import sa_dl  # our single-sermon downloader (low audio default, etc.)
 
 
-# ---------- Helpers ----------
+# ---------- Basic ID / URL helpers ----------
 
 def extract_series_id(arg: str) -> Optional[str]:
     """
     Extract the series numeric ID from:
-      - a bare ID: "200129"
-      - a URL: "https://www.sermonaudio.com/series/200129"
+      - a bare ID: "150726"
+      - a URL: "https://www.sermonaudio.com/series/150726"
     """
     arg = arg.strip()
 
-    # Bare ID: just digits
     if re.fullmatch(r"\d{3,}", arg):
         return arg
 
-    # URL case
     if arg.startswith("http://") or arg.startswith("https://"):
         parsed = urllib.parse.urlparse(arg)
-        # e.g. /series/200129 or /series/200129/...
         m = re.search(r"/series/(\d+)", parsed.path)
         if m:
             return m.group(1)
@@ -62,32 +47,65 @@ def extract_series_id(arg: str) -> Optional[str]:
 
 
 def build_series_url(series_id: str) -> str:
-    """
-    Construct a canonical series URL from the ID.
-    """
     return f"https://www.sermonaudio.com/series/{series_id}"
 
 
-def fetch_html(url: str) -> str:
+# ---------- Fetch helpers ----------
+
+def fetch_text(url: str) -> str:
     """
-    Fetch HTML from the given URL and return it as a decoded string.
+    Fetch text (HTML or XML) from the given URL and return it decoded as str.
     """
-    print(f"[+] Fetching series page:\n    {url}")
-    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+    print(f"[+] Fetching:\n    {url}")
+    req = urllib.request.Request(
+        url,
+        headers={
+            "User-Agent": "Mozilla/5.0",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        },
+    )
     with urllib.request.urlopen(req) as resp:
         charset = resp.headers.get_content_charset() or "utf-8"
         data = resp.read()
-    html = data.decode(charset, errors="replace")
-    return html
+    return data.decode(charset, errors="replace")
 
+
+def fetch_series_html(series_id: str) -> str:
+    url = build_series_url(series_id)
+    return fetch_text(url)
+
+
+def fetch_series_feed(series_id: str) -> Optional[str]:
+    """
+    Try to fetch the RSS feed for this series.
+
+    URL format:
+      https://feed.sermonaudio.com/<series_id>
+
+    Returns None on any error.
+    """
+    feed_url = f"https://feed.sermonaudio.com/{series_id}"
+    try:
+        text = fetch_text(feed_url)
+        return text
+    except urllib.error.HTTPError as e:
+        print(f"[!] RSS feed HTTP error for series {series_id}: {e.code}")
+    except urllib.error.URLError as e:
+        print(f"[!] RSS feed URL error for series {series_id}: {e.reason}")
+    except Exception as e:
+        print(f"[!] RSS feed error for series {series_id}: {e}")
+    return None
+
+
+# ---------- Parsing helpers ----------
 
 def extract_series_title_from_html(html: str) -> Optional[str]:
     """
     Try to get the series title from the <title> tag.
 
     Example:
-      <title>Freedom In The Gospel | SermonAudio</title>
-      -> "Freedom In The Gospel"
+      <title>Apologetics Individual Files | SermonAudio</title>
+      -> "Apologetics Individual Files"
     """
     m = re.search(r"<title[^>]*>(.*?)</title>", html, flags=re.IGNORECASE | re.DOTALL)
     if not m:
@@ -95,21 +113,11 @@ def extract_series_title_from_html(html: str) -> Optional[str]:
 
     title = m.group(1).strip()
     title = html_module.unescape(title)
-
-    # Strip " | SermonAudio" or similar suffix
     title = re.sub(r"\s*\|\s*SermonAudio.*$", "", title, flags=re.IGNORECASE).strip()
-    if not title:
-        return None
-
-    return title
+    return title or None
 
 
-def extract_sermon_ids_from_series_html(html: str) -> list[str]:
-    """
-    From the series HTML, extract all sermon IDs appearing as /sermons/<id>.
-    Returns a list of unique IDs, preserving their first-seen order.
-    """
-    ids = re.findall(r"/sermons/(\d+)", html)
+def dedupe_ids(ids: list[str]) -> list[str]:
     seen: set[str] = set()
     ordered: list[str] = []
     for sid in ids:
@@ -119,12 +127,27 @@ def extract_sermon_ids_from_series_html(html: str) -> list[str]:
     return ordered
 
 
+def extract_sermon_ids_from_series_html(html: str) -> list[str]:
+    """
+    From the series HTML, extract sermon IDs appearing as /sermons/<id>.
+    May only contain ~25 due to lazy loading.
+    """
+    ids = re.findall(r"/sermons/(\d+)", html)
+    return dedupe_ids(ids)
+
+
+def extract_sermon_ids_from_feed(feed_xml: str) -> list[str]:
+    """
+    From the series RSS feed XML, extract ALL sermon IDs appearing as /sermons/<id>.
+    """
+    ids = re.findall(r"/sermons/(\d+)", feed_xml)
+    return dedupe_ids(ids)
+
+
 def infer_series_title_from_audio(path: pathlib.Path) -> Optional[str]:
     """
-    Fallback: attempt to infer the series title from the first MP3's tags.
-
-    Specifically, look at the "Comments" tag (ID3 COMM), which
-    appears as "comment" or "comments" in mutagen's easy tags.
+    Fallback: attempt to infer the series title from the first MP3's tags,
+    looking at the "Comments" field (easy tags: comment/comments).
     """
     try:
         from mutagen import File as MutagenFile  # type: ignore
@@ -144,7 +167,6 @@ def infer_series_title_from_audio(path: pathlib.Path) -> Optional[str]:
             return v.strip()
         return None
 
-    # Try comments first (what you see in Windows "Comments")
     for key in ("comment", "comments"):
         t = first_tag(key)
         if t:
@@ -156,21 +178,17 @@ def infer_series_title_from_audio(path: pathlib.Path) -> Optional[str]:
 # ---------- Main series downloader ----------
 
 def download_series(series_arg: str) -> None:
-    """
-    Orchestrate the full series download.
-    """
     series_id = extract_series_id(series_arg)
     if series_id is None:
         print("[!] Could not extract a series ID.")
         print("    Pass either a SermonAudio series URL or a numeric ID.")
         sys.exit(1)
 
-    series_url = build_series_url(series_id)
-    html = fetch_html(series_url)
+    # 1) Fetch HTML (for title + fallback IDs)
+    html = fetch_series_html(series_id)
 
-    # 1) Try to get a pretty series title from HTML <title>
+    # 2) Series title from HTML
     html_title = extract_series_title_from_html(html)
-
     if html_title:
         folder_name = sa_dl.sanitize_filename(html_title)
         print(f"[+] Series title (from HTML): {html_title}")
@@ -179,15 +197,29 @@ def download_series(series_arg: str) -> None:
         print("[!] Could not determine series title from HTML.")
         print(f"    Using series ID as temporary folder name: {folder_name}")
 
-    sermon_ids = extract_sermon_ids_from_series_html(html)
+    # 3) Sermon IDs: prefer RSS feed; fall back to HTML if needed
+    sermon_ids: list[str] = []
+
+    feed_xml = fetch_series_feed(series_id)
+    if feed_xml:
+        sermon_ids = extract_sermon_ids_from_feed(feed_xml)
+        if sermon_ids:
+            print(f"[+] Retrieved sermon list from RSS feed: {len(sermon_ids)} sermons.")
+        else:
+            print("[!] RSS feed did not contain any sermon IDs; falling back to HTML.")
+
     if not sermon_ids:
-        print("[!] No sermon IDs found on this series page.")
+        sermon_ids = extract_sermon_ids_from_series_html(html)
+        print(f"[+] Retrieved sermon list from HTML: {len(sermon_ids)} sermons.")
+
+    if not sermon_ids:
+        print("[!] No sermon IDs found in feed or HTML. Nothing to download.")
         sys.exit(1)
 
-    print(f"[+] Found {len(sermon_ids)} sermons in series {series_id}:")
+    print(f"[+] Sermon IDs in series {series_id}:")
     print("    " + ", ".join(sermon_ids))
 
-    # Output directory: series title (if known) or ID
+    # 4) Output directory: series title (if known) or ID
     output_dir = pathlib.Path(folder_name)
     output_dir.mkdir(parents=True, exist_ok=True)
     print(f"[+] Downloading into folder: {output_dir.resolve()}")
@@ -228,8 +260,8 @@ def main() -> None:
         print("Usage: python sa_series_dl.py <series-url-or-id>")
         print()
         print("Examples:")
-        print("  python sa_series_dl.py https://www.sermonaudio.com/series/200129")
-        print("  python sa_series_dl.py 200129")
+        print("  python sa_series_dl.py https://www.sermonaudio.com/series/150726")
+        print("  python sa_series_dl.py 150726")
         sys.exit(1)
 
     series_arg = sys.argv[1].strip()
@@ -237,4 +269,8 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        print("\n[!] Interrupted by user (Ctrl+C). Exiting.")
+        sys.exit(1)

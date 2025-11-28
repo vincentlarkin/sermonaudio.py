@@ -2,15 +2,15 @@
 """
 SermonAudio downloader.
 
-Default: high-quality audio MP3 with automatic fallback to low-quality audio.
+Default: LOW-quality audio MP3 with automatic fallback to HIGH-quality audio.
 
 Filenames:
 
-  Audio high (default):
-    Artist - Sermon Title_audiohq.mp3
-
-  Audio low (fallback):
+  Audio low (default):
     Artist - Sermon Title_audiolow.mp3
+
+  Audio high (fallback):
+    Artist - Sermon Title_audiohq.mp3
 
   Video:
     Artist - Sermon Title_low.mp4
@@ -311,10 +311,11 @@ def download_file(
 
 def download_audio_with_fallback(sermon_id: str, output_dir: str = ".") -> pathlib.Path:
     """
-    Try high-quality audio first, then fall back to low if high isn't available.
+    Try LOW-quality audio first, then fall back to HIGH if low isn't available.
     """
     last_error: Optional[Exception] = None
-    for quality in ("high", "low"):
+    # Order changed: low first, then high
+    for quality in ("low", "high"):
         url = build_audio_url(sermon_id, quality)
         print(f"[+] Trying {quality} quality audio...")
         try:
@@ -374,7 +375,7 @@ def main() -> None:
 
     # AUDIO MODE (default)
     if is_media_url(user_input, ".mp3"):
-        q = detect_quality_from_url(user_input, "audio") or "high"
+        q = detect_quality_from_url(user_input, "audio") or "low"
         download_file(user_input, args.out, media_type="audio", quality=q)
         return
 
@@ -387,4 +388,8 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        print("\n[!] Interrupted by user (Ctrl+C). Exiting.")
+        sys.exit(1)
