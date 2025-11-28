@@ -21,10 +21,24 @@ import urllib.error
 import html as html_module
 from typing import Optional
 
+try:
+    import sa_auth
+except ImportError:
+    sa_auth = None
+
 import sa_dl  # our single-sermon downloader (low audio default, etc.)
 
 
 # ---------- Basic ID / URL helpers ----------
+
+def ensure_api_key():
+    # This is a bit hacky since sa_series uses urllib instead of requests session
+    # But we can at least ensure auth.txt is valid so if we switch to requests later or if other modules need it
+    if sa_auth:
+        try:
+            sa_auth.get_api_key()
+        except Exception as e:
+            print(f"[!] Auth error: {e}")
 
 def extract_series_id(arg: str) -> Optional[str]:
     """
