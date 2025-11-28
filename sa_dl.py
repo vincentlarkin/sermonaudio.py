@@ -164,7 +164,7 @@ def maybe_rename_audio_file(path: pathlib.Path, quality: Optional[str]) -> pathl
     """
     Try to rename an MP3 based on ID3 tags:
 
-      Artist - Title_<suffix>.mp3
+      Artist - Title.mp3 (no suffix by default now)
 
     If tags or mutagen are missing, keeps the original filename.
     """
@@ -202,11 +202,9 @@ def maybe_rename_audio_file(path: pathlib.Path, quality: Optional[str]) -> pathl
     base = sanitize_filename(base)
     ext = path.suffix or ".mp3"
 
-    suffix_label = choose_suffix("audio", quality)
-    if suffix_label:
-        new_name = f"{base}_{suffix_label}{ext}"
-    else:
-        new_name = f"{base}{ext}"
+    # User requested NO audio suffixes (e.g. _audiolow)
+    # We just use base + ext
+    new_name = f"{base}{ext}"
 
     new_path = path.with_name(new_name)
     if new_path == path:
@@ -216,7 +214,7 @@ def maybe_rename_audio_file(path: pathlib.Path, quality: Optional[str]) -> pathl
     if new_path.exists():
         i = 1
         while True:
-            candidate = path.with_name(f"{base}_{suffix_label}_{i}{ext}")
+            candidate = path.with_name(f"{base}_{i}{ext}")
             if not candidate.exists():
                 new_path = candidate
                 break
@@ -298,6 +296,84 @@ def download_file(
 
                 if total_size:
                     percent = bytes_downloaded * 100 // total_size
+                    # Simple console progress, can be overridden by callback if we add one
+                    print(f"\r[+] Downloaded: {percent}%", end="", flush=True)
+
+    print("\n[+] Download complete.")
+    return output_path, total_size or 0
+
+def download_file(
+    url: str,
+    output_dir: str = ".",
+    media_type: Optional[str] = None,  # "audio" | "video" | None
+    quality: Optional[str] = None,     # "low" | "high" | "1080p" | None
+    progress_callback=None             # (current, total) -> None
+) -> pathlib.Path:
+    """
+    Download a file, then (for audio) rename based on MP3 tags.
+
+    For video we still use the header/URL filename pattern, plus suffix.
+    """
+    output_dir_path = pathlib.Path(output_dir)
+    output_dir_path.mkdir(parents=True, exist_ok=True)
+
+    print(f"[+] Downloading:\n    {url}")
+
+    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+
+    with urllib.request.urlopen(req) as response:
+        # Initial filename guess
+        cd = response.headers.get("Content-Disposition")
+        if cd:
+            raw_name = extract_filename_from_content_disposition(cd) or filename_from_url(url)
+        else:
+            raw_name = filename_from_url(url)
+
+        p = pathlib.Path(raw_name)
+        base = p.stem or "download"
+        ext = p.suffix.lower()
+
+        if not ext:
+            if media_type == "audio":
+                ext = ".mp3"
+            elif media_type == "video":
+                ext = ".mp4"
+            else:
+                ext = ".bin"
+
+        base = sanitize_filename(base)
+        suffix_label = choose_suffix(media_type, quality)
+
+        if suffix_label and media_type == "video":
+            filename = f"{base}_{suffix_label}{ext}"
+        else:
+            filename = f"{base}{ext}"
+
+        output_path = output_dir_path / filename
+
+        print(f"[+] Saving as (initial):\n    {output_path}")
+
+        total_size_header = response.headers.get("Content-Length")
+        total_size = int(total_size_header) if total_size_header is not None else None
+
+        if total_size is not None:
+            print(f"[+] File size: {total_size / 1024:.1f} KB")
+
+        chunk_size = 8192
+        bytes_downloaded = 0
+
+        with open(output_path, "wb") as out_file:
+            while True:
+                chunk = response.read(chunk_size)
+                if not chunk:
+                    break
+                out_file.write(chunk)
+                bytes_downloaded += len(chunk)
+
+                if progress_callback:
+                    progress_callback(bytes_downloaded, total_size or 0)
+                elif total_size:
+                    percent = bytes_downloaded * 100 // total_size
                     print(f"\r[+] Downloaded: {percent}%", end="", flush=True)
 
     print("\n[+] Download complete.")
@@ -309,17 +385,26 @@ def download_file(
     return output_path
 
 
-def download_audio_with_fallback(sermon_id: str, output_dir: str = ".") -> pathlib.Path:
+def download_audio_with_fallback(
+    sermon_id: str, 
+    output_dir: str = ".", 
+    preferred_quality: str = "low",
+    progress_callback=None
+) -> pathlib.Path:
     """
-    Try LOW-quality audio first, then fall back to HIGH if low isn't available.
+    Try preferred quality first (default low), then fall back to the other if not available.
     """
     last_error: Optional[Exception] = None
-    # Order changed: low first, then high
-    for quality in ("low", "high"):
+    
+    qualities = ["low", "high"]
+    if preferred_quality == "high":
+        qualities = ["high", "low"]
+
+    for quality in qualities:
         url = build_audio_url(sermon_id, quality)
         print(f"[+] Trying {quality} quality audio...")
         try:
-            return download_file(url, output_dir, media_type="audio", quality=quality)
+            return download_file(url, output_dir, media_type="audio", quality=quality, progress_callback=progress_callback)
         except urllib.error.HTTPError as e:
             print(f"[!] {quality} audio failed: HTTP {e.code}")
             last_error = e

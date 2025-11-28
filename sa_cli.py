@@ -37,6 +37,21 @@ def handle_download(args):
     # Heuristic to guess type if not specified?
     # For now, just use sa_dl which handles single audio/video
     if args.video:
+        # Check availability first!
+        sid = sa_dl.extract_sermon_id(target)
+        if sid:
+            print(f"[+] Checking video availability for {sid}...")
+            info = sa_search.get_sermon_info(sid)
+            if info:
+                has_video = info.get('hasVideo', False)
+                media_vid = info.get('media', {}).get('video', [])
+                if not has_video or not media_vid:
+                    print("[!] ERROR: This sermon does not have a video available.")
+                    return
+                print("[+] Video availability confirmed.")
+            else:
+                print("[!] Warning: Could not verify video availability (API failure?). Proceeding anyway...")
+
         # CLI wrapper for sa_dl's logic
         # checking if user passed a quality
         quality = args.video if args.video in ["low", "high", "1080p"] else "low"
@@ -200,4 +215,3 @@ if __name__ == "__main__":
         main()
     except KeyboardInterrupt:
         sys.exit(1)
-

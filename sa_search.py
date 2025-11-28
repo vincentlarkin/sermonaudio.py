@@ -62,6 +62,20 @@ def perform_search(query: str, sort_by: str = None) -> dict:
         print(f"[!] Search failed: {e}")
         return {}
 
+def get_sermon_info(sermon_id: str) -> dict:
+    ensure_api_key()
+    url = f"https://api.sermonaudio.com/v2/node/sermons/{sermon_id}"
+    try:
+        resp = session.get(url, timeout=20)
+        if resp.status_code == 404:
+            print(f"[!] Sermon {sermon_id} not found.")
+            return {}
+        resp.raise_for_status()
+        return resp.json()
+    except Exception as e:
+        print(f"[!] Failed to get sermon info: {e}")
+        return {}
+
 def print_broadcasters(results):
     if not results:
         return
