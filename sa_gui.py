@@ -3,7 +3,9 @@ import threading
 import sys
 import io
 import os
-import time
+import ctypes
+import ctypes.util
+from pathlib import Path
 import sa_search
 import sa_dl
 import sa_speaker
@@ -23,6 +25,118 @@ class TextRedirector(io.StringIO):
         self.text_widget.update()
         # Also print to real stdout for debugging
         sys.__stdout__.write(string)
+
+
+LIB_STAGING_DIR = Path(__file__).resolve().parent / ".native_libs"
+
+
+def _safe_unlink(path: Path):
+    try:
+        path.unlink()
+    except FileNotFoundError:
+        pass
+
+
+def configure_linux_ui_defaults():
+    if sys.platform != "linux":
+        return
+    # Force a known-good cursor theme when none is configured to avoid GTK warnings.
+    os.environ.setdefault("XCURSOR_THEME", "Adwaita")
+
+
+def _libmpv_available(target: str) -> bool:
+    try:
+        ctypes.CDLL(target)
+        return True
+    except OSError:
+        return False
+
+
+def ensure_libmpv():
+    """
+    Flet's media widgets require libmpv.so.1 on Linux. Some distributions (Arch, Fedora, etc.)
+    only ship libmpv.so.2+, so we create a local symlink that satisfies the loader without
+    requiring sudo hacks.
+    """
+    if sys.platform != "linux":
+        return
+
+    lib_name = "libmpv.so.1"
+    if _libmpv_available(lib_name):
+        return
+
+    env_ld_paths = [p for p in os.environ.get("LD_LIBRARY_PATH", "").split(":") if p]
+    common_dirs = [
+        "/usr/lib",
+        "/usr/lib64",
+        "/usr/lib/x86_64-linux-gnu",
+        "/lib",
+        "/lib64",
+        "/lib/x86_64-linux-gnu",
+    ]
+    search_dirs = []
+    for path in env_ld_paths + common_dirs:
+        if path and os.path.isdir(path) and path not in search_dirs:
+            search_dirs.append(path)
+
+    candidate_path = None
+    versioned_matches = []
+    for directory in search_dirs:
+        dir_path = Path(directory)
+        for match in sorted(dir_path.glob("libmpv.so*"), key=lambda p: p.name, reverse=True):
+            if not match.exists():
+                continue
+            if match.name == lib_name:
+                candidate_path = match.resolve()
+                break
+            if match.name.startswith("libmpv.so.") and match.name != "libmpv.so":
+                versioned_matches.append(match.resolve())
+        if candidate_path:
+            break
+
+    if not candidate_path and versioned_matches:
+        candidate_path = versioned_matches[0]
+
+    if not candidate_path:
+        located = ctypes.util.find_library("mpv")
+        if located and os.path.isabs(located):
+            candidate_path = Path(located).resolve()
+
+    if not candidate_path:
+        print("[Init] Warning: libmpv not found on system paths; media playback may fail.")
+        return
+
+    LIB_STAGING_DIR.mkdir(exist_ok=True)
+    link_path = LIB_STAGING_DIR / lib_name
+
+    try:
+        if link_path.exists() or link_path.is_symlink():
+            current_target = None
+            try:
+                current_target = link_path.resolve()
+            except OSError:
+                pass
+            if current_target != candidate_path:
+                _safe_unlink(link_path)
+                os.symlink(str(candidate_path), link_path)
+        else:
+            os.symlink(str(candidate_path), link_path)
+    except OSError as err:
+        print(f"[Init] Unable to prepare libmpv shim: {err}")
+        return
+
+    existing_ld = [p for p in os.environ.get("LD_LIBRARY_PATH", "").split(":") if p]
+    if str(LIB_STAGING_DIR) not in existing_ld:
+        os.environ["LD_LIBRARY_PATH"] = ":".join([str(LIB_STAGING_DIR)] + existing_ld).strip(":")
+
+    if _libmpv_available(str(link_path)):
+        print(f"[Init] libmpv resolved via {link_path} -> {candidate_path}")
+    else:
+        print("[Init] Warning: libmpv shim could not be loaded; playback may still fail.")
+
+
+ensure_libmpv()
+configure_linux_ui_defaults()
 
 def main(page: ft.Page):
     # Load Config
@@ -206,6 +320,8 @@ def main(page: ft.Page):
                 show_error()
             
         threading.Thread(target=_search_task, daemon=True).start()
+
+    search_query.on_submit = run_search
 
     # --- Download Logic ---
     
