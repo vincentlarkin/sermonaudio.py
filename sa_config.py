@@ -40,3 +40,5 @@ def save_config(key, value):
     except Exception as e:
         print(f"[Config] Error saving config: {e}")
 
+
+
