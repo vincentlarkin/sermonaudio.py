@@ -9,7 +9,6 @@ sapy command line.
   sapy broadcaster heartcry     a whole church/broadcaster catalog
   sapy search <words...>        just show search results
   sapy config [set|unset KEY VALUE]
-  sapy gui                      desktop app (pip install "sermonaudio.py[gui]")
 
 Quality:
   audio  -q high (default) | -q low                 (--small is short for -q low:
@@ -31,7 +30,7 @@ from .download import (AUDIO_QUALITIES, QUALITY_ALIASES, VIDEO_QUALITIES, Sermon
                        normalize_quality, series_sermons, single_sermon, speaker_sermons)
 from .resolve import KINDS, Target, resolve
 
-COMMANDS = ("search", "config", "gui") + KINDS
+COMMANDS = ("search", "config") + KINDS
 
 FORMAT_MENU = [
     ("audio", "high", "Audio", "full quality"),
@@ -524,11 +523,12 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: Optional[List[str]] = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
+    # Piped output on Windows is cp1252, which can't encode ✓ ▶ → and would crash print()
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(errors="replace")
     if argv and argv[0] == "config":
         return config_cmd(argv[1:])
-    if argv and argv[0] == "gui":
-        from .gui import run
-        return run()
 
     parser = build_parser()
     opts = parser.parse_args(argv)

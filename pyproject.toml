@@ -18,9 +18,6 @@ classifiers = [
     "Topic :: Multimedia :: Sound/Audio",
 ]
 
-[project.optional-dependencies]
-gui = ["PySide6>=6.5"]
-
 [project.scripts]
 sapy = "sapy.cli:main"
 

@@ -7,7 +7,6 @@ Keys:
   quality       default audio quality, "low" or "high"
   video_quality default video quality: 360p, 720p, 1080p or best
   workers       parallel downloads for bulk jobs
-  show_logs / theme_mode / gui_format   GUI preferences
 """
 
 import json
@@ -20,17 +19,14 @@ DEFAULTS = {
     "quality": "high",
     "video_quality": "720p",
     "workers": 3,
-    "show_logs": True,
-    "theme_mode": "dark",
-    "gui_format": "audio:high",
 }
 
 
 def config_dir() -> Path:
-    base = os.environ.get("XDG_CONFIG_HOME") or os.path.join(os.path.expanduser("~"), ".config")
-    if os.name == "nt":
-        base = os.environ.get("APPDATA") or base
-    return Path(base) / "sapy"
+    base = os.environ.get("XDG_CONFIG_HOME")
+    if not base and os.name == "nt":
+        base = os.environ.get("APPDATA")
+    return Path(base or os.path.join(os.path.expanduser("~"), ".config")) / "sapy"
 
 
 def config_path() -> Path:

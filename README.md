@@ -1,11 +1,10 @@
 # sermonaudio.py (`sapy`)
 
 Search and download sermons from [SermonAudio.com](https://www.sermonaudio.com) — single sermons,
-everything by a speaker, whole series, or a church's full catalog — from the terminal or a desktop app.
+everything by a speaker, whole series, or a church's full catalog — from the terminal.
 
 ```bash
-pip install sermonaudio.py            # command line
-pip install "sermonaudio.py[gui]"     # plus the desktop app (PySide6)
+pip install sermonaudio.py
 ```
 
 ## Usage
@@ -77,7 +76,6 @@ Options:
 | `-l` | list what would be downloaded and stop |
 | `-y` | don't ask for confirmation |
 | `-j N` | parallel downloads (default 3) |
-| `sapy gui` | open the desktop app |
 
 ### What "smart" means here
 
@@ -110,6 +108,6 @@ it, the next request gets refused, and sapy automatically re-reads the current k
 ## Development
 
 ```bash
-pip install -e ".[gui]"
+pip install -e .
 python -m unittest discover -s tests
 ```
