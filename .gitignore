@@ -215,3 +215,8 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# sapy
+auth.txt
+config.json
+*.part

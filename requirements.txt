@@ -1,4 +1,0 @@
-mutagen
-requests
-beautifulsoup4
-PySide6

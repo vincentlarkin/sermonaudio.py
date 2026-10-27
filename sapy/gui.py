@@ -48,13 +48,11 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-import sa_auth
-import sa_broadcaster
-import sa_config
-import sa_dl
-import sa_search
-import sa_series
-import sa_speaker
+from . import api, config as sa_config
+from .cli import FORMAT_MENU
+from .download import (broadcaster_sermons, clean, download_many, download_sermon, normalize_quality,
+                       series_sermons, single_sermon, speaker_sermons)
+from .resolve import resolve
 
 
 def _safe_text(value: Optional[str], fallback: str = "") -> str:
@@ -196,7 +194,7 @@ class SermonAudioMainWindow(QMainWindow):
         self.setFont(QFont("Segoe UI", 9))
 
         self.config = sa_config.load_config()
-        self.download_dir = self.config.get("download_dir", os.getcwd())
+        self.download_dir = sa_config.download_dir(self.config)
         self.show_logs = bool(self.config.get("show_logs", True))
         self.dark_mode = self.config.get("theme_mode", "dark") == "dark"
 
@@ -299,6 +297,16 @@ class SermonAudioMainWindow(QMainWindow):
         self.download_dir_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         layout.addWidget(self.download_dir_label, 1)
 
+        layout.addWidget(QLabel("Format:"))
+        self.format_combo = QComboBox()
+        for media, quality, label, _note in FORMAT_MENU:
+            self.format_combo.addItem(label, f"{media}:{quality}")
+        idx = self.format_combo.findData(self.config.get("gui_format", "audio:high"))
+        self.format_combo.setCurrentIndex(max(0, idx))
+        self.format_combo.currentIndexChanged.connect(
+            lambda _i: sa_config.save_config("gui_format", self.format_combo.currentData()))
+        layout.addWidget(self.format_combo)
+
         change_btn = QPushButton("Change")
         change_btn.clicked.connect(self._choose_download_dir)
         open_btn = QPushButton("Open")
@@ -372,19 +380,11 @@ class SermonAudioMainWindow(QMainWindow):
         self.manual_target_input.setPlaceholderText("Sermon URL or ID")
         self.manual_target_input.returnPressed.connect(self._queue_manual_download)
 
-        self.manual_format_combo = QComboBox()
-        self.manual_format_combo.addItems(["Audio", "Video"])
-        self.manual_format_combo.currentTextChanged.connect(self._on_manual_format_changed)
-
-        self.manual_quality_combo = QComboBox()
-        self.manual_quality_combo.addItems(["Low", "High"])
 
         queue_btn = QPushButton("Queue Download")
         queue_btn.clicked.connect(self._queue_manual_download)
 
         row.addWidget(self.manual_target_input, 1)
-        row.addWidget(self.manual_format_combo)
-        row.addWidget(self.manual_quality_combo)
         row.addWidget(queue_btn)
         layout.addLayout(row)
 
@@ -870,7 +870,7 @@ class SermonAudioMainWindow(QMainWindow):
 
     def _refresh_auth_status(self, force: bool):
         def _job(signals: WorkerSignals):
-            key = sa_auth.get_api_key(force_refresh=force)
+            key = api.get_api_key(force_refresh=force)
             return key
 
         worker = Worker(_job)
@@ -898,7 +898,7 @@ class SermonAudioMainWindow(QMainWindow):
 
         def _job(signals: WorkerSignals):
             sort_by = "newest-published" if newest else None
-            data = sa_search.perform_search(query, sort_by=sort_by)
+            data = api.search(query, sort_by=sort_by)
             return data
 
         worker = Worker(_job)
@@ -1071,17 +1071,9 @@ class SermonAudioMainWindow(QMainWindow):
         layout.addLayout(btn_row)
         return frame
 
-    def _on_manual_format_changed(self, value: str):
-        value = value.lower()
-        current = self.manual_quality_combo.currentText().lower()
-        self.manual_quality_combo.clear()
-        if value == "audio":
-            self.manual_quality_combo.addItems(["Low", "High"])
-        else:
-            self.manual_quality_combo.addItems(["Low", "High", "1080p"])
-
-        idx = self.manual_quality_combo.findText(current.capitalize(), Qt.MatchFlag.MatchFixedString)
-        self.manual_quality_combo.setCurrentIndex(0 if idx < 0 else idx)
+    def _current_format(self) -> tuple[str, str]:
+        media, _, quality = (self.format_combo.currentData() or "audio:high").partition(":")
+        return media, quality
 
     def _queue_manual_download(self):
         target = _safe_text(self.manual_target_input.text())
@@ -1222,83 +1214,34 @@ class SermonAudioMainWindow(QMainWindow):
         quality: Optional[str] = None,
     ):
         item_title = title or target
-        fmt = (media_format or self.manual_format_combo.currentText()).strip().lower()
-        qual = (quality or self.manual_quality_combo.currentText()).strip().lower()
-        if fmt not in ("audio", "video"):
-            fmt = "audio"
-        if qual not in ("low", "high", "1080p"):
-            qual = "low"
+        fmt, qual = self._current_format()
+        fmt = media_format or fmt
+        qual = normalize_quality(fmt, quality or qual)
 
         task_id = self._add_queue_task_row(item_name=item_title, item_type=f"Single ({fmt})", status="Queued")
         self.tabs.setCurrentIndex(2)
 
         def _job(signals: WorkerSignals):
             signals.status.emit("Preparing")
-            sid = sa_dl.extract_sermon_id(target)
-
-            if fmt == "video" and sid:
-                signals.status.emit("Checking video")
-                info = sa_search.get_sermon_info(sid)
-                has_video = bool(info.get("hasVideo"))
-                has_video_media = bool(info.get("media", {}).get("video"))
-                if not has_video or not has_video_media:
-                    raise RuntimeError("This sermon has no video available.")
+            t = resolve(target, "sermon")
+            if t.kind != "sermon":
+                raise RuntimeError("Manual download takes a single sermon link or ID.")
+            media = t.media or fmt
+            quality = normalize_quality(media, t.quality if t.media else qual)
+            sermon = single_sermon(t.value)
+            if media == "video" and sermon.has_video is False:
+                raise RuntimeError("This sermon has no video available.")
 
             def _progress(current, total):
                 signals.progress.emit(int(current), int(total))
-                if total:
-                    pct = int((current / total) * 100)
-                    signals.status.emit(f"{pct}%")
-                else:
-                    signals.status.emit("Downloading")
+                signals.status.emit(f"{int(current * 100 / total)}%" if total else "Downloading")
 
-            if fmt == "video":
-                if sa_dl.is_media_url(target, ".mp4"):
-                    q = sa_dl.detect_quality_from_url(target, "video") or qual
-                    output = sa_dl.download_file(
-                        target,
-                        self.download_dir,
-                        media_type="video",
-                        quality=q,
-                        progress_callback=_progress,
-                    )
-                else:
-                    sid_value = sid or target
-                    url = sa_dl.build_video_url(sid_value, qual)
-                    output = sa_dl.download_file(
-                        url,
-                        self.download_dir,
-                        media_type="video",
-                        quality=qual,
-                        progress_callback=_progress,
-                    )
-            else:
-                if sa_dl.is_media_url(target, ".mp3"):
-                    q = sa_dl.detect_quality_from_url(target, "audio") or qual
-                    output = sa_dl.download_file(
-                        target,
-                        self.download_dir,
-                        media_type="audio",
-                        quality=q,
-                        progress_callback=_progress,
-                    )
-                elif sid:
-                    output = sa_dl.download_audio_with_fallback(
-                        sid,
-                        self.download_dir,
-                        preferred_quality=qual,
-                        progress_callback=_progress,
-                    )
-                else:
-                    output = sa_dl.download_file(
-                        target,
-                        self.download_dir,
-                        media_type="audio",
-                        quality=qual,
-                        progress_callback=_progress,
-                    )
-
-            return {"status": "Complete", "open_path": str(output)}
+            status, output = download_sermon(sermon, self.download_dir, media, quality, progress=_progress)
+            if status == "missing" and media == "video":
+                raise RuntimeError("No video is available for this sermon.")
+            if status == "missing":
+                raise RuntimeError(f"No {media} file is available for this sermon.")
+            return {"status": "Already had" if status == "skipped" else "Complete", "open_path": str(output)}
 
         self._start_queue_worker(task_id, _job)
 
@@ -1308,7 +1251,8 @@ class SermonAudioMainWindow(QMainWindow):
             self._show_error("Queue Error", f"Unknown bulk mode: {mode}")
             return
 
-        task_id = self._add_queue_task_row(item_name=name_hint, item_type=f"Bulk ({mode})", status="Queued")
+        fmt, qual = self._current_format()
+        task_id = self._add_queue_task_row(item_name=name_hint, item_type=f"Bulk ({mode}, {fmt})", status="Queued")
         self.tabs.setCurrentIndex(2)
 
         def _job(signals: WorkerSignals):
@@ -1316,53 +1260,35 @@ class SermonAudioMainWindow(QMainWindow):
             signals.progress.emit(0, 0)
 
             if mode == "speaker":
-                display_name = sa_speaker.get_speaker_name(target_id)
-                sermon_ids = sa_speaker.collect_sermon_ids_via_node(target_id)
-                download_fn = sa_speaker.download_sermon_audio
-                folder_path = os.path.join(self.download_dir, sa_dl.sanitize_filename(display_name))
+                sermons = speaker_sermons(target_id)
+                display_name = sermons[0].speaker if sermons else name_hint
             elif mode == "broadcaster":
-                display_name = sa_broadcaster.get_broadcaster_name(target_id)
-                sermon_ids = sa_broadcaster.collect_sermon_ids_via_broadcaster(target_id)
-                download_fn = sa_broadcaster.download_sermon_audio
-                folder_path = os.path.join(self.download_dir, sa_dl.sanitize_filename(display_name))
+                sermons = broadcaster_sermons(target_id)
+                display_name = sermons[0].broadcaster if sermons else name_hint
             else:
-                series_id = sa_series.extract_series_id(target_id) or _safe_text(target_id)
-                if not series_id:
-                    raise RuntimeError("Invalid series ID.")
+                display_name, sermons = series_sermons(resolve(target_id, "series").value)
 
-                html = sa_series.fetch_series_html(series_id)
-                display_name = sa_series.extract_series_title_from_html(html) or f"Series {series_id}"
-                feed_xml = sa_series.fetch_series_feed(series_id)
-                if feed_xml:
-                    sermon_ids = sa_series.extract_sermon_ids_from_feed(feed_xml)
-                else:
-                    sermon_ids = []
-                if not sermon_ids:
-                    sermon_ids = sa_series.extract_sermon_ids_from_series_html(html)
-
-                folder_path = os.path.join(self.download_dir, sa_dl.sanitize_filename(display_name))
-                os.makedirs(folder_path, exist_ok=True)
-
-                def download_fn(sermon_id: str, out_dir: str, _display_name: str):
-                    sa_dl.download_audio_with_fallback(sermon_id, out_dir)
-
-            if not sermon_ids:
+            if not sermons:
                 raise RuntimeError("No sermons found for this target.")
 
-            total = len(sermon_ids)
-            failures = 0
-            target_dir = folder_path if mode == "series" else self.download_dir
-            for idx, sermon_id in enumerate(sermon_ids, start=1):
+            def _on_done(idx, total, sermon, status, path):
                 signals.status.emit(f"{idx}/{total}")
                 signals.progress.emit(idx, total)
-                try:
-                    download_fn(sermon_id, target_dir, display_name)
-                except Exception as exc:
-                    failures += 1
-                    print(f"[bulk] Failed sermon {sermon_id}: {exc}")
+                if status.startswith("error") or status == "missing":
+                    print(f"[bulk] {sermon.sermon_id} {sermon.title}: {status}")
 
-            status = "Complete" if failures == 0 else f"Complete ({failures} failed)"
-            return {"status": status, "open_path": folder_path}
+            workers = int(sa_config.load_config().get("workers", 3))
+            if fmt == "video":
+                sermons = [s for s in sermons if s.has_video is not False]
+                if not sermons:
+                    raise RuntimeError("None of these sermons have video.")
+            counts = download_many(sermons, self.download_dir, fmt, qual, workers=workers, on_done=_on_done)
+            failed = counts["error"] + counts["missing"]
+            status = "Complete" if failed == 0 else f"Complete ({failed} failed)"
+            first = sermons[0]
+            folder = os.path.join(self.download_dir, clean(first.folder or first.speaker or first.broadcaster,
+                                                           "Unknown Speaker"))
+            return {"status": status, "open_path": folder}
 
         self._start_queue_worker(task_id, _job)
 
