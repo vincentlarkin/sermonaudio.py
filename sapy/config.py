@@ -17,12 +17,12 @@ from pathlib import Path
 DEFAULTS = {
     "download_dir": "",
     "api_key": "",
-    "quality": "low",
+    "quality": "high",
     "video_quality": "720p",
     "workers": 3,
     "show_logs": True,
     "theme_mode": "dark",
-    "gui_format": "audio:low",
+    "gui_format": "audio:high",
 }
 
 

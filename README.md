@@ -55,7 +55,7 @@ sapy <sermon> -F                  # which formats exist, with sizes
 sapy <sermon> --video             # 720p (default; change with `sapy config set video_quality 1080p`)
 sapy <sermon> --video 1080p       # or 360p, 720p, best
 sapy speaker "paul washer" --video 360p -n 10
-sapy <sermon> --hq                # high-quality audio
+sapy <sermon> --small             # low-quality audio, about a sixth the size
 ```
 
 If a sermon doesn't have the quality you asked for, sapy takes the nearest one it does have
@@ -70,7 +70,7 @@ Options:
 | `-o DIR` | download folder (default: `download_dir` setting, else the current folder) |
 | `--video [360p\|720p\|1080p\|best]` | video instead of audio (default 720p) |
 | `-q QUALITY` | audio `low`/`high`, or a video quality |
-| `--hq` | high-quality audio (default is low: small, fine for speech) |
+| `--small` | low-quality audio: about a sixth the size, but muffled (default is full quality) |
 | `-F` | show a sermon's available formats and sizes |
 | `-s` | pick one of a speaker's or church's series |
 | `-n N` | only the newest N (speaker/broadcaster) or first N (series; add `--newest` for the latest N) |
@@ -91,7 +91,7 @@ Options:
 ```bash
 sapy config                                   # show settings and where they're stored
 sapy config set download_dir ~/Sermons
-sapy config set quality high                  # default audio quality
+sapy config set quality low                   # default audio quality (high unless you change it)
 sapy config set video_quality 1080p           # default video quality
 sapy config set workers 4
 sapy config set api_key YOUR-KEY              # use your own SermonAudio API key

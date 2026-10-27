@@ -21,7 +21,7 @@ from . import api
 
 CLOUD = "https://cloud.sermonaudio.com/media"
 
-AUDIO_QUALITIES = ("low", "high")
+AUDIO_QUALITIES = ("high", "low")  # low is ~16 kbps: a sixth the size, but muffled
 # Label -> SermonAudio's tier name. Tiers really are 360p/720p/1080p for modern uploads.
 VIDEO_TIERS = {"360p": "low", "720p": "high", "1080p": "1080p"}
 VIDEO_QUALITIES = ("360p", "720p", "1080p", "best")
@@ -45,7 +45,7 @@ def normalize_quality(media: str, quality: Optional[str]) -> str:
         if q.isdigit():
             q += "p"
         return q if q in VIDEO_QUALITIES else "720p"
-    return q if q in AUDIO_QUALITIES else "low"
+    return q if q in AUDIO_QUALITIES else "high"
 
 
 def quality_chain(media: str, quality: str) -> List[str]:
@@ -111,7 +111,7 @@ def clean(name: str, fallback: str = "Untitled") -> str:
     return name[:150].strip() or fallback
 
 
-def target_path(s: Sermon, root: str, media: str = "audio", quality: str = "low") -> Path:
+def target_path(s: Sermon, root: str, media: str = "audio", quality: str = "high") -> Path:
     folder = Path(root) / clean(s.folder or s.speaker or s.broadcaster, "Unknown Speaker")
     if s.series:
         folder /= clean(s.series)
@@ -123,7 +123,7 @@ def target_path(s: Sermon, root: str, media: str = "audio", quality: str = "low"
     return folder / f"{stem}.mp3"
 
 
-def existing_path(s: Sermon, root: str, media: str = "audio", quality: str = "low") -> Optional[Path]:
+def existing_path(s: Sermon, root: str, media: str = "audio", quality: str = "high") -> Optional[Path]:
     """A file already on disk for this sermon (in the asked-for quality or a fallback of it)."""
     chain = quality_chain(media, quality) if media == "video" else [quality]
     for q in chain:
@@ -237,7 +237,7 @@ def tag(path: Path, s: Sermon) -> None:
         print(f"[tag] {path.name}: {e}")
 
 
-def download_sermon(s: Sermon, root: str, media: str = "audio", quality: str = "low",
+def download_sermon(s: Sermon, root: str, media: str = "audio", quality: str = "high",
                     progress: Optional[Callable[[int, int], None]] = None) -> Tuple[str, Path]:
     """Returns (status, path); status is "downloaded", "skipped" or "missing".
     Falls back to the nearest available quality when the asked-for one doesn't exist."""
@@ -254,7 +254,7 @@ def download_sermon(s: Sermon, root: str, media: str = "audio", quality: str = "
     return "missing", target_path(s, root, media, chain[0])
 
 
-def download_many(sermons: Iterable[Sermon], root: str, media: str = "audio", quality: str = "low",
+def download_many(sermons: Iterable[Sermon], root: str, media: str = "audio", quality: str = "high",
                   workers: int = 3,
                   on_done: Optional[Callable[[int, int, Sermon, str, Path], None]] = None) -> dict:
     """Download in parallel. on_done(index, total, sermon, status, path); status may be "error: ...".

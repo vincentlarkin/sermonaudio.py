@@ -12,7 +12,8 @@ sapy command line.
   sapy gui                      desktop app (pip install "sermonaudio.py[gui]")
 
 Quality:
-  audio  -q low (default, small) | -q high          (--hq is short for -q high)
+  audio  -q high (default) | -q low                 (--small is short for -q low:
+         about a sixth the size, but noticeably muffled)
   video  --video [360p|720p|1080p|best]             (default 720p; falls back
          to the nearest quality a sermon actually has)
   -F     show which formats a sermon has, with sizes
@@ -33,8 +34,8 @@ from .resolve import KINDS, Target, resolve
 COMMANDS = ("search", "config", "gui") + KINDS
 
 FORMAT_MENU = [
-    ("audio", "low", "Audio", "smallest, fine for speech"),
-    ("audio", "high", "Audio HQ", "full quality"),
+    ("audio", "high", "Audio", "full quality"),
+    ("audio", "low", "Audio, small", "a sixth the size, muffled"),
     ("video", "360p", "Video 360p", ""),
     ("video", "720p", "Video 720p", ""),
     ("video", "1080p", "Video 1080p", ""),
@@ -86,7 +87,8 @@ def media_choice(target: Target, opts) -> Tuple[str, str]:
         from_link = target.quality if target.media == "video" else ""
         return "video", normalize_quality("video", opts.video or q or from_link or cfg.get("video_quality"))
     from_link = target.quality if target.media == "audio" else ""
-    return "audio", normalize_quality("audio", "high" if opts.hq else (q or from_link or cfg.get("quality")))
+    wanted = "low" if opts.small else (q or from_link or cfg.get("quality"))
+    return "audio", normalize_quality("audio", wanted)
 
 
 def choose_format(current: Tuple[str, str], sizes: Optional[dict] = None,
@@ -505,7 +507,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--video", nargs="?", const="", metavar="QUALITY",
                    help="video instead of audio: 360p, 720p, 1080p or best (default: video_quality setting, 720p)")
     p.add_argument("-q", "--quality", help="audio: low or high; video: 360p, 720p, 1080p or best")
-    p.add_argument("--hq", action="store_true", help="high-quality audio (same as -q high)")
+    p.add_argument("--small", action="store_true", help="small, low-quality audio (same as -q low)")
     p.add_argument("-F", "--formats", action="store_true", help="show the formats a sermon has, with sizes")
     p.add_argument("-s", "--series", dest="series_pick", action="store_true",
                    help="for a speaker or broadcaster: pick one of their series (lists them with -l / -y)")

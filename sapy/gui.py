@@ -301,7 +301,7 @@ class SermonAudioMainWindow(QMainWindow):
         self.format_combo = QComboBox()
         for media, quality, label, _note in FORMAT_MENU:
             self.format_combo.addItem(label, f"{media}:{quality}")
-        idx = self.format_combo.findData(self.config.get("gui_format", "audio:low"))
+        idx = self.format_combo.findData(self.config.get("gui_format", "audio:high"))
         self.format_combo.setCurrentIndex(max(0, idx))
         self.format_combo.currentIndexChanged.connect(
             lambda _i: sa_config.save_config("gui_format", self.format_combo.currentData()))
@@ -1072,7 +1072,7 @@ class SermonAudioMainWindow(QMainWindow):
         return frame
 
     def _current_format(self) -> tuple[str, str]:
-        media, _, quality = (self.format_combo.currentData() or "audio:low").partition(":")
+        media, _, quality = (self.format_combo.currentData() or "audio:high").partition(":")
         return media, quality
 
     def _queue_manual_download(self):

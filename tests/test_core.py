@@ -72,7 +72,8 @@ class QualityTests(unittest.TestCase):
         self.assertEqual(normalize_quality("video", "1080"), "1080p")
         self.assertEqual(normalize_quality("video", "nonsense"), "720p")
         self.assertEqual(normalize_quality("audio", "high"), "high")
-        self.assertEqual(normalize_quality("audio", "720p"), "low")
+        self.assertEqual(normalize_quality("audio", "720p"), "high")
+        self.assertEqual(normalize_quality("audio", "low"), "low")
 
     def test_fallback_order(self):
         self.assertEqual(quality_chain("video", "1080p"), ["1080p", "720p", "360p"])
@@ -80,13 +81,15 @@ class QualityTests(unittest.TestCase):
         self.assertEqual(quality_chain("video", "360p"), ["360p", "720p", "1080p"])
         self.assertEqual(quality_chain("video", "best"), ["1080p", "720p", "360p"])
         self.assertEqual(quality_chain("audio", "low"), ["low", "high"])
+        self.assertEqual(quality_chain("audio", "high"), ["high", "low"])
 
     def test_cli_choice(self):
         p = cli.build_parser()
         with tempfile.TemporaryDirectory() as d, mock.patch.dict(os.environ, {"XDG_CONFIG_HOME": d}):
             choice = lambda args, t=Target("sermon", "1"): cli.media_choice(t, p.parse_args(args))
-            self.assertEqual(choice([]), ("audio", "low"))
-            self.assertEqual(choice(["--hq"]), ("audio", "high"))
+            self.assertEqual(choice([]), ("audio", "high"))
+            self.assertEqual(choice(["--small"]), ("audio", "low"))
+            self.assertEqual(choice(["-q", "low"]), ("audio", "low"))
             self.assertEqual(choice(["--video"]), ("video", "720p"))
             self.assertEqual(choice(["--video", "1080p"]), ("video", "1080p"))
             self.assertEqual(choice(["-q", "360p"]), ("video", "360p"))
