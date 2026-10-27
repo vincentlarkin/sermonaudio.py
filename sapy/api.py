@@ -27,6 +27,7 @@ UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chr
 session = requests.Session()
 session.headers["User-Agent"] = UA
 _key_lock = threading.Lock()
+_api_key: Optional[str] = None  # sent only to the API, never to the site, feed or media hosts
 
 
 class ApiError(RuntimeError):
@@ -106,22 +107,24 @@ def get_api_key(force_refresh: bool = False) -> str:
     return fetch_site_key()
 
 
-def _ensure_key(force_refresh: bool = False) -> None:
+def _ensure_key(force_refresh: bool = False) -> str:
+    global _api_key
     with _key_lock:
-        if force_refresh or "X-API-Key" not in session.headers:
-            session.headers["X-API-Key"] = get_api_key(force_refresh)
+        if force_refresh or not _api_key:
+            _api_key = get_api_key(force_refresh)
+        return _api_key
 
 
 def _get(path: str, params: dict = None) -> dict:
-    _ensure_key()
+    key = _ensure_key()
     url = f"{API}/{path.lstrip('/')}"
     for attempt in range(4):
-        resp = session.get(url, params=params, timeout=30)
+        resp = session.get(url, params=params, headers={"X-API-Key": key}, timeout=30)
         if resp.status_code == 401 and attempt == 0:
             # Site key rotated; fetch a fresh one once. Your own key is never replaced.
             if os.environ.get("SAPY_API_KEY") or config.load_config().get("api_key"):
                 raise ApiError("SermonAudio rejected your API key (HTTP 401).")
-            _ensure_key(force_refresh=True)
+            key = _ensure_key(force_refresh=True)
             continue
         if resp.status_code in (429, 500, 502, 503, 504) and attempt < 3:
             time.sleep(2 ** attempt)
