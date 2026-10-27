@@ -1,61 +1,79 @@
-# SermonAudio Downloader Suite
+# sermonaudio.py (`sapy`)
 
-A concept set of open tools to download sermons, series, and entire speaker libraries from SermonAudio.com.
+Search and download sermons from [SermonAudio.com](https://www.sermonaudio.com) — single sermons,
+everything by a speaker, whole series, or a church's full catalog — from the terminal or a desktop app.
 
-## Features
-
-- **CLI:** Search and download from the command line.
-- **GUI:** A native desktop interface built with Qt (PySide6).
-- **Auto-Auth:** Automatically fetches and maintains the required API keys.
-- **Bulk Downloading:** Download entire speaker libraries, broadcaster catalogs, or sermon series.
-- **Smart Tagging:** Automatically renames files based on metadata (where available).
-
-## Installation
-
-1.  Clone the repo.
-2.  Install dependencies:
-    ```bash
-    pip install requests beautifulsoup4 PySide6 mutagen
-    ```
+```bash
+pip install sermonaudio.py            # command line
+pip install "sermonaudio.py[gui]"     # plus the desktop app (PySide6)
+```
 
 ## Usage
 
-### 1. Graphical Interface (GUI)
-The easiest way to use the tools.
+Run `sapy` with nothing after it for interactive mode: type a search or paste a link, pick a result, download.
+
+Or hand it anything and it works out what it is:
+
 ```bash
-python sa_gui.py
+sapy https://www.sermonaudio.com/sermons/21422247165025   # one sermon
+sapy https://www.sermonaudio.com/speakers/48786           # everything by a speaker
+sapy https://www.sermonaudio.com/series/151324            # a whole series, in order
+sapy https://www.sermonaudio.com/broadcasters/heartcry    # a church's full catalog
+sapy 21422247165025                                       # a sermon ID
+sapy paul washer                                          # search, then pick
 ```
 
-### 2. Command Line Interface (CLI)
+Name things directly:
 
-**Search:**
 ```bash
-python sa_cli.py search "paul washer"
-python sa_cli.py search "gospel of john" --newest
+sapy speaker "paul washer"       # by name or ID
+sapy series 151324
+sapy broadcaster heartcry
+sapy search gospel of john --newest
 ```
 
-**Download a Single Sermon:**
+Options:
+
+| | |
+|---|---|
+| `-o DIR` | download folder (default: `download_dir` setting, else the current folder) |
+| `--video [low\|high\|1080p]` | video instead of audio (default `high` = 720p) |
+| `--hq` | high-quality audio (default is low, which is plenty for speech) |
+| `-n N` | only the newest N (speaker/broadcaster) or first N (series) |
+| `-l` | list what would be downloaded and stop |
+| `-y` | don't ask for confirmation |
+| `-j N` | parallel downloads (default 3) |
+| `sapy gui` | open the desktop app |
+
+### What "smart" means here
+
+- **Organized:** `Speaker/Series/2020-04-20 - Title.mp3`. Sermons outside a series go straight in the speaker folder.
+- **Re-runnable:** files you already have are skipped, so running the same speaker or series again only gets new sermons.
+- **Resumable:** interrupted downloads continue from where they stopped.
+- **Tagged:** title, speaker, series, church and date are written into each file's tags, so music players sort them properly.
+
+## Settings
+
 ```bash
-python sa_cli.py download https://www.sermonaudio.com/sermons/21422247165025
-python sa_cli.py download 21422247165025 --audio high
+sapy config                                   # show settings and where they're stored
+sapy config set download_dir ~/Sermons
+sapy config set quality high                  # default audio quality
+sapy config set workers 4
+sapy config set api_key YOUR-KEY              # use your own SermonAudio API key
 ```
 
-**Download Everything by a Speaker:**
-```bash
-python sa_cli.py speaker 48786
-# or via URL
-python sa_cli.py speaker https://www.sermonaudio.com/speakers/48786/
-```
+Settings live in `~/.config/sapy/config.json` (`%APPDATA%\sapy` on Windows).
 
-**Download a Broadcaster:**
-```bash
-python sa_cli.py broadcaster ghbc
-```
+## API key
 
-**Download a Series:**
-```bash
-python sa_cli.py series https://www.sermonaudio.com/series/36435
-```
+Downloads themselves don't need a key; search and listings do. By default sapy uses the public key
+that sermonaudio.com itself uses, cached in `~/.config/sapy/site_key.txt` and re-read from the site
+when it changes. If you have your own key, set it with `sapy config set api_key ...` or the
+`SAPY_API_KEY` environment variable and it takes priority.
 
-## Authentication
-The tool automatically handles API keys. If you encounter auth issues, simply delete `auth.txt` and the script will fetch a fresh key on the next run.
+## Development
+
+```bash
+pip install -e ".[gui]"
+python -m unittest discover -s tests
+```

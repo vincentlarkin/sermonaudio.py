@@ -6,12 +6,12 @@ import unittest
 
 class SaGuiQtTests(unittest.TestCase):
     def test_module_import_and_entrypoints(self):
-        mod = importlib.import_module("sa_gui")
+        mod = importlib.import_module("sapy.gui")
         self.assertTrue(hasattr(mod, "SermonAudioMainWindow"))
         self.assertTrue(callable(mod.run))
 
     def test_text_helpers(self):
-        mod = importlib.import_module("sa_gui")
+        mod = importlib.import_module("sapy.gui")
         self.assertEqual(mod._safe_text(None, "x"), "x")
         self.assertEqual(mod._safe_text("  abc  "), "abc")
         self.assertEqual(mod._sermon_title({"fullTitle": "Hello"}), "Hello")
@@ -20,7 +20,7 @@ class SaGuiQtTests(unittest.TestCase):
         self.assertEqual(mod._broadcaster_name({}), "Unknown broadcaster")
 
     def test_log_stream_write_passthrough(self):
-        mod = importlib.import_module("sa_gui")
+        mod = importlib.import_module("sapy.gui")
         sink = io.StringIO()
         stream = mod.GuiLogStream(sink)
         count = stream.write("abc")
@@ -29,7 +29,7 @@ class SaGuiQtTests(unittest.TestCase):
 
     def test_source_uses_qt_tabs_not_flet(self):
         root = pathlib.Path(__file__).resolve().parents[1]
-        source = (root / "sa_gui.py").read_text(encoding="utf-8")
+        source = (root / "sapy" / "gui.py").read_text(encoding="utf-8")
         self.assertIn("QTabWidget", source)
         self.assertIn("self.tabs.addTab(self._build_search_tab(), \"Search\")", source)
         self.assertIn("self.tabs.addTab(self._build_manual_tab(), \"Manual Download\")", source)
