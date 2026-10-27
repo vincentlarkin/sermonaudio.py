@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -7,7 +7,8 @@ name = "sermonaudio.py"
 dynamic = ["version"]
 description = "Search and download sermons, speakers, series and whole churches from SermonAudio.com"
 readme = "README.md"
-license = { file = "LICENSE" }
+license = "GPL-3.0-or-later"
+license-files = ["LICENSE"]
 authors = [{ name = "Vincent Larkin" }]
 requires-python = ">=3.9"
 dependencies = ["requests>=2.25", "mutagen>=1.45"]
