@@ -5,8 +5,9 @@ Keys:
   download_dir  where downloads go when -o isn't given (default: current dir)
   api_key       your own SermonAudio API key; overrides the site key
   quality       default audio quality, "low" or "high"
+  video_quality default video quality: 360p, 720p, 1080p or best
   workers       parallel downloads for bulk jobs
-  show_logs / theme_mode   GUI preferences
+  show_logs / theme_mode / gui_format   GUI preferences
 """
 
 import json
@@ -17,9 +18,11 @@ DEFAULTS = {
     "download_dir": "",
     "api_key": "",
     "quality": "low",
+    "video_quality": "720p",
     "workers": 3,
     "show_logs": True,
     "theme_mode": "dark",
+    "gui_format": "audio:low",
 }
 
 

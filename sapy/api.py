@@ -39,26 +39,53 @@ def _site_key_path():
     return config.config_dir() / "site_key.txt"
 
 
+_UUID = r"[A-Fa-f0-9]{8}-[A-Fa-f0-9]{4}-[A-Fa-f0-9]{4}-[A-Fa-f0-9]{4}-[A-Fa-f0-9]{12}"
+_KEY_NAME = re.compile(r"(?:public|api)_?key", re.I)
+
+
+def _key_from_nuxt_payload(html: str) -> Optional[str]:
+    """Nuxt 3 serializes state as a flat JSON array; dicts point at values by index."""
+    m = re.search(r'<script[^>]*id="__NUXT_DATA__"[^>]*>(.*?)</script>', html, re.S)
+    if not m:
+        return None
+    try:
+        data = json.loads(m.group(1))
+    except ValueError:
+        return None
+    for item in data:
+        if not isinstance(item, dict):
+            continue
+        for name, idx in item.items():
+            if _KEY_NAME.search(name) and isinstance(idx, int) and 0 <= idx < len(data):
+                value = data[idx]
+                if isinstance(value, str) and re.fullmatch(_UUID, value):
+                    return value
+    return None
+
+
+def _key_from_text(text: str) -> Optional[str]:
+    """apiKey:"…" / publicKey: '…' / "api_key": "…" inlined in HTML or JS."""
+    m = re.search(r'(?:api|public)_?key["\']?\s*[:=]\s*["\'](' + _UUID + ')', text, re.I)
+    return m.group(1) if m else None
+
+
 def fetch_site_key() -> str:
-    """Read the public API key out of the homepage's Nuxt payload."""
+    """Find the public API key sermonaudio.com uses: page state first, then its JS bundles."""
     resp = session.get(SITE + "/", timeout=30)
     resp.raise_for_status()
     html = resp.text
-    key = None
-    m = re.search(r'<script[^>]*id="__NUXT_DATA__"[^>]*>(.*?)</script>', html, re.S)
-    if m:
-        data = json.loads(m.group(1))
-        for item in data:
-            if isinstance(item, dict):
-                idx = item.get("$sapi:publicKey", item.get("api:publicKey"))
-                if isinstance(idx, int) and isinstance(data[idx], str):
-                    key = data[idx]
-                    break
-    if not key:  # older Nuxt builds inlined it as apiKey:"..."
-        m = re.search(r'apiKey:"([A-F0-9-]{30,})"', html)
-        key = m.group(1) if m else None
+    key = _key_from_nuxt_payload(html) or _key_from_text(html)
     if not key:
-        raise ApiError("Could not find the API key on sermonaudio.com; the site layout may have changed.")
+        for src in list(dict.fromkeys(re.findall(r'(?:src|href)="(/_nuxt/[^"]+\.js)"', html)))[:40]:
+            try:
+                key = _key_from_text(session.get(SITE + src, timeout=30).text)
+            except requests.RequestException:
+                continue
+            if key:
+                break
+    if not key:
+        raise ApiError("Could not find the API key on sermonaudio.com; the site layout may have changed. "
+                       "You can set your own with: sapy config set api_key YOUR-KEY")
     path = _site_key_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(key, encoding="utf-8")
@@ -144,6 +171,27 @@ def sermons(page_size: int = 100, limit: Optional[int] = None, **filters) -> Ite
         if len(results) < page_size or not data.get("next", True):
             return
         page += 1
+
+
+def series(series_id: str) -> dict:
+    """Series details: title, count, broadcaster, earliest/latest dates."""
+    return _get(f"series/{series_id}")
+
+
+def broadcaster_series(broadcaster_id: str) -> Iterator[dict]:
+    page = 1
+    while True:
+        data = _get(f"broadcasters/{broadcaster_id}/series", {"page": page, "pageSize": 100})
+        results = data.get("results") or []
+        yield from results
+        if len(results) < 100 or not data.get("next", True):
+            return
+        page += 1
+
+
+def count_sermons(**filters) -> int:
+    data = _get("sermons", {"page": 1, "pageSize": 1, "liteBroadcaster": "true", **filters})
+    return int(data.get("totalCount") or 0)
 
 
 def sermons_by_ids(ids: List[str]) -> List[dict]:

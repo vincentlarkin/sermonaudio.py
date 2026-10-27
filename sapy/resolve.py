@@ -14,7 +14,7 @@ class Target:
     value: str                # ID, or the query text for search / speaker-by-name
     media: Optional[str] = None    # "audio"/"video" when a direct media link was given
     quality: Optional[str] = None
-    by_name: bool = False     # speaker given as a name, needs a search
+    by_name: bool = False     # speaker/series given as a name, needs a search
 
 
 def resolve(text: str, kind: Optional[str] = None) -> Target:
@@ -29,8 +29,8 @@ def resolve(text: str, kind: Optional[str] = None) -> Target:
         raise ValueError(f"Don't know how to handle this link: {text}")
 
     if kind:
-        if kind == "speaker" and not text.isdigit():
-            return Target("speaker", text, by_name=True)
+        if kind in ("speaker", "series") and not text.isdigit():
+            return Target(kind, text, by_name=True)
         return Target(kind, text)
 
     if re.fullmatch(r"\d{9,}", text):
@@ -46,6 +46,11 @@ def _from_url(url: str) -> Optional[Target]:
     m = re.search(r"/media/(audio|video)/([^/]+)/(\d+)\.(mp3|mp4)$", path)
     if m:
         return Target("sermon", m.group(3), media=m.group(1), quality=m.group(2))
+
+    # Podcast feeds: feed.sermonaudio.com/<seriesID>
+    m = re.fullmatch(r"/(\d+)/?", path)
+    if u.netloc.startswith("feed.") and m:
+        return Target("series", m.group(1))
 
     for kind, pattern in (("sermon", r"/sermons/(\d+)"), ("speaker", r"/speakers/(\d+)"),
                           ("series", r"/series/(\d+)"), ("broadcaster", r"/broadcasters/([^/?#]+)")):
